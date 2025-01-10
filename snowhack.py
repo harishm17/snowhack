@@ -6,8 +6,7 @@ import io
 from pypdf import PdfReader
 import ftfy
 import nltk
-from snowflake.snowpark.context import get_active_session
-from snowflake.snowpark.root import Root
+from snowflake.core import Root
 
 CORTEX_SEARCH_DATABASE = "SAMPLEDATA"
 CORTEX_SEARCH_SCHEMA = "PUBLIC"
@@ -163,8 +162,7 @@ def check_file_exists(conn, filename, username, session_id):
 
 def get_similar_chunks_search_service(query):
     """Search relevant chunks using the Cortex Search Service"""
-    session = get_active_session()
-    root = Root(session)
+    root = Root(st.session_state.snowflake_connection)
     svc = root.databases[CORTEX_SEARCH_DATABASE].schemas[CORTEX_SEARCH_SCHEMA].cortex_search_services[CORTEX_SEARCH_SERVICE]
 
     filter_obj = {"@eq": {"username": st.session_state["username"], "session_id": st.session_state["session_id"]}}
