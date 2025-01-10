@@ -253,16 +253,17 @@ def main():
             if query:
                 with st.spinner("Searching..."):
                     results = get_similar_chunks_search_service(query)
+                    st.write(results)
                     # Display search results
-                    if results:
-                        st.markdown("### Most Relevant Chunks")
-                        for result in results:
-                            st.markdown(f"**Document: {result['relative_path']}**")
-                            st.markdown(f"**Chunk Size:** {result['size']} bytes")
-                            st.markdown(result['chunk'])
-                            st.markdown("---")
-                    else:
-                        st.info("No relevant chunks found")
+                    # if results:
+                    #     st.markdown("### Most Relevant Chunks")
+                    #     for result in results:
+                    #         st.markdown(f"**Document: {result['relative_path']}**")
+                    #         st.markdown(f"**Chunk Size:** {result['size']} bytes")
+                    #         st.markdown(result['chunk'])
+                    #         st.markdown("---")
+                    # else:
+                    #     st.info("No relevant chunks found")
             else:
                 st.warning("Please enter a search query")
 
