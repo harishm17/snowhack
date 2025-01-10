@@ -1,15 +1,11 @@
 import streamlit as st
 import snowflake.connector
-from snowflake.connector.errors import ProgrammingError
 import os
-import re
 from hashlib import sha256
-from pypdf import PdfReader
 import io
+from pypdf import PdfReader
 import ftfy
 import nltk
-
-
 
 def init_snowflake_connection():
     """Initialize Snowflake connection"""
@@ -47,11 +43,8 @@ def register_user(conn, username, password):
         VALUES (%s, %s)
         """, (username, sha256(password.encode()).hexdigest()))
         return True
-    except ProgrammingError as e:
-        if "duplicate key value violates unique constraint" in str(e):
-            st.error("Username already exists")
-        else:
-            st.error(f"Registration error: {str(e)}")
+    except Exception as e:
+        st.error(f"Registration error: {str(e)}")
         return False
     finally:
         cursor.close()
@@ -62,10 +55,10 @@ def extract_text_from_pdf(file_content):
         pdf_file = io.BytesIO(file_content)
         pdf_reader = PdfReader(pdf_file)
         text_content = ""
-        
+
         for page in pdf_reader.pages:
             text_content += page.extract_text() + "\n\n"
-        
+
         return text_content
     except Exception as e:
         st.error(f"Error extracting PDF content: {str(e)}")
@@ -73,16 +66,8 @@ def extract_text_from_pdf(file_content):
 
 def clean_text(text):
     """Clean text using ftfy library and additional cleaning"""
-    import ftfy
-    import re
-    
-    # Fix text encoding issues
     text = ftfy.fix_text(text)
-    
-    # Additional cleaning steps
-    text = re.sub(r'\s+', ' ', text)  # normalize whitespace
     text = text.strip()
-    
     return text
 
 def process_and_upload_file(conn, file, stage_name="DOCS"):
@@ -90,7 +75,7 @@ def process_and_upload_file(conn, file, stage_name="DOCS"):
     cursor = None
     temp_dir = "/tmp/uploads"
     local_file_path = None
-    
+
     try:
         # Check if file already exists in session
         if check_file_exists(conn, file.name, st.session_state.username, st.session_state.session_id):
@@ -98,10 +83,10 @@ def process_and_upload_file(conn, file, stage_name="DOCS"):
             return True
 
         os.makedirs(temp_dir, mode=0o777, exist_ok=True)
-        
+
         cursor = conn.cursor()
         file_content = file.getvalue()
-        
+
         # Extract text and clean it
         if file.name.lower().endswith('.pdf'):
             text_content = extract_text_from_pdf(file_content)
@@ -109,107 +94,36 @@ def process_and_upload_file(conn, file, stage_name="DOCS"):
                 return False
         else:
             text_content = file_content.decode('utf-8', errors='ignore')
-        
+
         # Clean the extracted text
         text_content = clean_text(text_content)
-        
+
         # Save file locally for stage upload
         safe_filename = file.name.replace(" ", "_")
         local_file_path = os.path.join(temp_dir, safe_filename)
-        
+
         with open(local_file_path, "wb") as f:
             f.write(file_content)
-        
+
         # Upload to stage
-        try:
-            put_command = f"PUT 'file://{local_file_path}' @{stage_name} AUTO_COMPRESS=FALSE OVERWRITE=TRUE"
-            cursor.execute(put_command)
-            st.success(f"✅ {file.name} uploaded to stage")
-            
-            # Store metadata
-            cursor.execute("""
-            INSERT INTO UPLOADED_FILES_METADATA 
-            (USERNAME, SESSION_ID, STAGE_NAME, FILE_NAME)
-            VALUES (%s, %s, %s, %s)
-            """, (
-                st.session_state.username,
-                st.session_state.session_id,
-                stage_name,
-                file.name
-            ))
-            
-            # Process text content into chunks with overlap
-            # Use NLTK for better sentence splitting
-            import nltk
-            try:
-                nltk.data.find('tokenizers/punkt')
-            except LookupError:
-                nltk.download('punkt')
-            
-            sentences = nltk.sent_tokenize(text_content)
-            
-            # Combine sentences into chunks
-            chunk_size = 2000
-            current_chunk = []
-            current_size = 0
-            chunks = []
-            
-            for sentence in sentences:
-                sentence = sentence.strip()
-                sentence_size = len(sentence)
-                
-                if current_size + sentence_size > chunk_size and current_chunk:
-                    # Join current chunk and add to chunks
-                    chunk_text = ' '.join(current_chunk)
-                    chunk_text = clean_text(chunk_text)
-                    if chunk_text.strip():
-                        chunks.append(chunk_text)
-                    current_chunk = []
-                    current_size = 0
-                
-                current_chunk.append(sentence)
-                current_size += sentence_size
-            
-            # Add the last chunk if it exists
-            if current_chunk:
-                chunk_text = ' '.join(current_chunk)
-                chunk_text = clean_text(chunk_text)
-                if chunk_text.strip():
-                    chunks.append(chunk_text)
-            
-            chunks_created = 0
-            for chunk in chunks:
-                if chunk.strip():
-                    cursor.execute("""
-                    INSERT INTO DOCS_CHUNKS_TABLE 
-                    (RELATIVE_PATH, SIZE, FILE_URL, CHUNK, USERNAME, SESSION_ID)
-                    VALUES (%s, %s, %s, %s, %s, %s)
-                    """, (
-                        file.name,
-                        len(chunk),
-                        f"@{stage_name}/{safe_filename}",
-                        chunk,
-                        st.session_state.username,
-                        st.session_state.session_id
-                    ))
-                    chunks_created += 1
-            
-            st.success(f"✅ Created {chunks_created} chunks for {file.name}")
-            
-            # Display chunks
-            st.write(f"### Chunks for {file.name}:")
-            chunks = get_chunks_for_file(conn, file.name, st.session_state.username, st.session_state.session_id)
-            
-            for idx, (chunk, size) in enumerate(chunks, 1):
-                with st.expander(f"Chunk {idx} (Size: {size} bytes)"):
-                    st.markdown(chunk)
-            
-            return True
-            
-        except Exception as e:
-            st.error(f"Stage upload error for {file.name}: {str(e)}")
-            return False
-            
+        put_command = f"PUT 'file://{local_file_path}' @{stage_name} AUTO_COMPRESS=FALSE OVERWRITE=TRUE"
+        cursor.execute(put_command)
+        st.success(f"✅ {file.name} uploaded to stage")
+
+        # Store metadata
+        cursor.execute("""
+        INSERT INTO UPLOADED_FILES_METADATA 
+        (USERNAME, SESSION_ID, STAGE_NAME, FILE_NAME)
+        VALUES (%s, %s, %s, %s)
+        """, (
+            st.session_state.username,
+            st.session_state.session_id,
+            stage_name,
+            file.name
+        ))
+
+        return True
+
     except Exception as e:
         st.error(f"Error processing {file.name}: {str(e)}")
         return False
@@ -221,26 +135,6 @@ def process_and_upload_file(conn, file, stage_name="DOCS"):
                 os.remove(local_file_path)
         except Exception:
             pass
-
-
-def get_chunks_for_file(conn, filename, username, session_id):
-    """Retrieve all chunks for a specific file"""
-    try:
-        cursor = conn.cursor()
-        cursor.execute("""
-        SELECT CHUNK, SIZE
-        FROM DOCS_CHUNKS_TABLE 
-        WHERE RELATIVE_PATH = %s 
-        AND USERNAME = %s
-        AND SESSION_ID = %s
-        ORDER BY SIZE
-        """, (filename, username, session_id))
-        return cursor.fetchall()
-    except Exception as e:
-        st.error(f"Error fetching chunks: {str(e)}")
-        return []
-    finally:
-        cursor.close()
 
 def check_file_exists(conn, filename, username, session_id):
     """Check if file already exists in the current session"""
@@ -261,86 +155,36 @@ def check_file_exists(conn, filename, username, session_id):
     finally:
         cursor.close()
 
-def search_documents(conn, query):
-    """Search documents with flexible text matching"""
+def search_documents_cortex_service(conn, query):
+    """Search documents using the Cortex Search Service"""
     try:
         cursor = conn.cursor()
-        
-        # Prepare search terms by splitting query into words
-        search_terms = query.strip().split()
-        if not search_terms:
-            return []
-            
-        # Create a LIKE condition for each term
-        conditions = []
-        params = [st.session_state.username, st.session_state.session_id]
-        
-        for term in search_terms:
-            conditions.append("LOWER(chunk) LIKE LOWER(%s)")
-            params.append(f"%{term}%")
-            
-        where_clause = " OR ".join(conditions)
-        
-        # Execute search with flexible matching
-        cursor.execute(f"""
-        WITH search_results AS (
-            SELECT
-                chunk,
-                relative_path,
-                size,
-                username,
-                session_id
-            FROM docs_chunks_table
-            WHERE username = %s 
-            AND session_id = %s
-            AND ({where_clause})
+
+        # Query the Cortex Search Service
+        cortex_service_query = f"""
+        SELECT * FROM TABLE(
+            CORTEX_SEARCH('SAMPLEDATA.PUBLIC.docs_search_svc', '{query}')
+            FILTER (username = '{st.session_state.username}' AND session_id = '{st.session_state.session_id}')
+            LIMIT 3
         )
-        SELECT *
-        FROM search_results
-        ORDER BY size DESC
-        LIMIT 3
-        """, params)
-        
+        """
+
+        cursor.execute(cortex_service_query)
         results = cursor.fetchall()
-        
+
         if not results:
             return []
-            
-        # Format results
+
         formatted_results = []
-        current_file = None
-        current_chunks = []
-        
-        for chunk, file_name, size, username, session_id in results:
-            if current_file != file_name:
-                if current_file:
-                    formatted_results.append({
-                        'file': current_file,
-                        'chunks': current_chunks
-                    })
-                current_file = file_name
-                current_chunks = []
-            
-            # Calculate a simple relevance score based on how many terms match
-            matched_terms = sum(1 for term in search_terms 
-                              if term.lower() in chunk.lower())
-            relevance = matched_terms / len(search_terms)
-            
-            current_chunks.append({
-                'content': chunk,
-                'size': size,
-                'relevance': relevance
-            })
-        
-        # Add the last file's results
-        if current_file:
+        for chunk, file_name, session_id, username, size in results:
             formatted_results.append({
-                'file': current_file,
-                'chunks': current_chunks
+                'file': file_name,
+                'chunk': chunk,
+                'size': size
             })
-        
+
         return formatted_results
-        
+
     except Exception as e:
         st.error(f"Search error: {str(e)}")
         return []
@@ -350,29 +194,29 @@ def search_documents(conn, query):
 
 def main():
     st.set_page_config(page_title="Document Search System", layout="wide")
-    
+
     # Initialize session state
     if 'authenticated' not in st.session_state:
         st.session_state.authenticated = False
-    
+
     # Initialize Snowflake connection
     if 'snowflake_connection' not in st.session_state:
         st.session_state.snowflake_connection = init_snowflake_connection()
-    
+
     conn = st.session_state.snowflake_connection
     if not conn:
         st.error("Failed to connect to Snowflake")
         return
-    
+
     # Authentication UI
     if not st.session_state.authenticated:
         tab1, tab2 = st.tabs(["Login", "Sign Up"])
-        
+
         with tab1:
             st.subheader("🔐 Login")
             username = st.text_input("Username", key="login_username")
             password = st.text_input("Password", type="password", key="login_password")
-            
+
             if st.button("Login"):
                 if authenticate(conn, username, password):
                     st.session_state.authenticated = True
@@ -382,23 +226,23 @@ def main():
                     st.rerun()
                 else:
                     st.error("Invalid credentials")
-        
+
         with tab2:
             st.subheader("📝 Sign Up")
             new_username = st.text_input("New Username", key="signup_username")
             new_password = st.text_input("New Password", type="password", key="signup_password")
             confirm_password = st.text_input("Confirm Password", type="password", key="confirm_password")
-            
+
             if st.button("Sign Up"):
                 if new_password != confirm_password:
                     st.error("Passwords do not match")
                 elif register_user(conn, new_username, new_password):
                     st.success("Registration successful! Please login.")
-    
+
     else:
         # Main application UI
         st.title("Document Search System")
-        
+
         # File upload section
         st.header("📤 Upload Documents")
         uploaded_files = st.file_uploader(
@@ -406,42 +250,33 @@ def main():
             accept_multiple_files=True,
             key="file_uploader"
         )
-        
+
         if uploaded_files:
             with st.spinner("Processing files..."):
                 for file in uploaded_files:
                     process_and_upload_file(conn, file)
-        
+
         # Search section
         st.header("🔍 Search Documents")
         query = st.text_area("Enter your search query:")
-        
+
         if st.button("Search"):
             if query:
                 with st.spinner("Searching..."):
-                    results = search_documents(conn, query)
+                    results = search_documents_cortex_service(conn, query)
                     # Display search results
                     if results:
                         st.markdown("### Most Relevant Chunks")
                         for i, result in enumerate(results, 1):
                             st.markdown(f"**Document: {result['file']}**")
-                            
-                            # Display chunks in a table
-                            chunks_data = []
-                            for j, chunk_info in enumerate(result['chunks'], 1):
-                                chunks_data.append({
-                                    "Chunk #": j,
-                                    "Size (bytes)": chunk_info['size'],
-                                    "Relevance Score": f"{chunk_info['relevance']:.3f}",
-                                    "Content": chunk_info['content']
-                                })
-                            st.table(chunks_data)
+                            st.markdown(f"**Chunk Size:** {result['size']} bytes")
+                            st.markdown(result['chunk'])
                             st.markdown("---")
                     else:
                         st.info("No relevant chunks found")
             else:
                 st.warning("Please enter a search query")
-        
+
         # Logout button
         if st.sidebar.button("Logout"):
             st.session_state.clear()
