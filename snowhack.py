@@ -165,11 +165,21 @@ def get_similar_chunks_search_service(query):
     root = Root(st.session_state.snowflake_connection)
     svc = root.databases[CORTEX_SEARCH_DATABASE].schemas[CORTEX_SEARCH_SCHEMA].cortex_search_services[CORTEX_SEARCH_SERVICE]
 
-    filter_obj = {"@eq": {"username": st.session_state["username"], "session_id": st.session_state["session_id"]}}
+    # Combine filters using @and
+    filter_obj = {
+        "@and": [
+            {"@eq": {"username": st.session_state["username"]}},
+            {"@eq": {"session_id": st.session_state["session_id"]}}
+        ]
+    }
+
+    # Perform search
     response = svc.search(query, ["chunk", "relative_path", "size"], filter=filter_obj, limit=3)
 
+    # Display the response
     st.sidebar.json(response.to_json())
     return response.to_json()
+
 
 def main():
     st.set_page_config(page_title="Document Search System", layout="wide")
