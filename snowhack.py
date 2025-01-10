@@ -155,42 +155,15 @@ def check_file_exists(conn, filename, username, session_id):
     finally:
         cursor.close()
 
-def search_documents_cortex_service(conn, query):
-    """Search documents using the Cortex Search Service"""
-    try:
-        cursor = conn.cursor()
+def get_similar_chunks_search_service(query):
+    """Search relevant chunks using the Cortex Search Service"""
+    svc = st.session_state.snowflake_connection.cursor().cortex_search_services["SAMPLEDATA.PUBLIC.docs_search_svc"]
 
-        # Query the Cortex Search Service
-        cortex_service_query = f"""
-        SELECT * FROM TABLE(
-            CORTEX_SEARCH('SAMPLEDATA.PUBLIC.docs_search_svc', '{query}')
-            FILTER (username = '{st.session_state.username}' AND session_id = '{st.session_state.session_id}')
-            LIMIT 3
-        )
-        """
+    filter_obj = {"@eq": {"username": st.session_state["username"], "session_id": st.session_state["session_id"]}}
+    response = svc.search(query, ["chunk", "relative_path", "size"], filter=filter_obj, limit=3)
 
-        cursor.execute(cortex_service_query)
-        results = cursor.fetchall()
-
-        if not results:
-            return []
-
-        formatted_results = []
-        for chunk, file_name, session_id, username, size in results:
-            formatted_results.append({
-                'file': file_name,
-                'chunk': chunk,
-                'size': size
-            })
-
-        return formatted_results
-
-    except Exception as e:
-        st.error(f"Search error: {str(e)}")
-        return []
-    finally:
-        if cursor:
-            cursor.close()
+    st.sidebar.json(response.to_json())
+    return response.to_json()
 
 def main():
     st.set_page_config(page_title="Document Search System", layout="wide")
@@ -263,12 +236,12 @@ def main():
         if st.button("Search"):
             if query:
                 with st.spinner("Searching..."):
-                    results = search_documents_cortex_service(conn, query)
+                    results = get_similar_chunks_search_service(query)
                     # Display search results
                     if results:
                         st.markdown("### Most Relevant Chunks")
-                        for i, result in enumerate(results, 1):
-                            st.markdown(f"**Document: {result['file']}**")
+                        for result in results:
+                            st.markdown(f"**Document: {result['relative_path']}**")
                             st.markdown(f"**Chunk Size:** {result['size']} bytes")
                             st.markdown(result['chunk'])
                             st.markdown("---")
